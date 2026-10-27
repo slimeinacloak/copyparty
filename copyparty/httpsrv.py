@@ -55,6 +55,7 @@ except SyntaxError:
     sys.exit(1)
 
 from .authsrv import LEELOO_DALLAS
+from .bwlim import BwLim
 from .httpconn import HttpConn
 from .ico import Ico
 from .metrics import Metrics
@@ -140,6 +141,10 @@ class HttpSrv(object):
 
         self.thumbcli: Optional[ThumbCli] = None
         self.ico: Ico = Ico(self.args)
+
+        self.bwlim: Optional[BwLim] = None
+        if self.args.dl_bw_all or self.args.dl_bw_usr or self.args.dl_bw:
+            self.bwlim = BwLim(self.args)
 
         dli: dict[str, tuple[float, int, "VFS", str, str]] = {}  # info
         dls: dict[str, tuple[float, int]] = {}  # state

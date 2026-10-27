@@ -86,6 +86,7 @@ built in Norway 🇳🇴 with contributions from [not-norway](https://github.com
         * [periodic rescan](#periodic-rescan) - filesystem monitoring
     * [u2sz](#u2sz) - configure upload-chunking
     * [upload rules](#upload-rules) - set upload rules using volflags
+    * [download speed limits](#download-speed-limits) - cap how fast files can be downloaded, for each user and in total
     * [compress uploads](#compress-uploads) - files can be autocompressed on upload
     * [chmod and chown](#chmod-and-chown) - per-volume filesystem-permissions and ownership
     * [other flags](#other-flags)
@@ -1899,6 +1900,32 @@ config file example:
     lifetime: 300   # uploads are deleted after 5min
     maxn: 250,3600  # each IP can upload 250 files in 1 hour
     maxb: 1g,300    # each IP can upload 1 GiB over 5 minutes
+```
+
+
+## download speed limits
+
+cap how fast files can be downloaded, for each user and in total
+
+* `--dl-bw-all 100m` all downloads combined can never exceed 100 MiB/s; the active downloads split it equally
+* `--dl-bw-usr 5m` each user can download at most 5 MiB/s; if they start several downloads at once, the downloads share those 5 MiB/s between them
+  * anonymous visitors are not logged in, so they are limited per IP-address instead
+* `--dl-bw alice=20m,@admins=0,*=1m` overrides `--dl-bw-usr` for user `alice`, the group `admins`, and anonymous visitors (`*`); `0` means no per-user limit, and a user who is in several groups gets the fastest one
+
+speeds are bytes per second, with optional suffixes `k`, `m`, `g` (1024-based). The limits apply to file downloads over http and webdav, including zip/tar archives, audio transcodes, the markdown viewer, and `?tail`; the web-UI itself, thumbnails, and directory listings are never throttled
+
+the limits are tracked per processing node, so with `-j 4` each node enforces them separately, and a user could get up to 4x the configured speed
+
+config file example:
+
+```yaml
+[global]
+  dl-bw-all: 100m   # all downloads combined
+  dl-bw-usr: 5m     # each user, across all their downloads
+  dl-bw: alice=20m, @admins=0, *=1m
+
+[groups]
+  admins: ed, kim
 ```
 
 

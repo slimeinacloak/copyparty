@@ -263,6 +263,7 @@ if True:  # pylint: disable=using-constant-test
 if TYPE_CHECKING:
     from .authsrv import VFS
     from .broker_util import BrokerCli
+    from .bwlim import BwStream
     from .up2k import Up2k
 
 FAKE_MP = False
@@ -3490,6 +3491,7 @@ def sendfile_py(
     use_poll: bool,
     dls: dict[str, tuple[float, int]],
     dl_id: str,
+    bwl: Optional["BwStream"] = None,
 ) -> int:
     sent = 0
     remains = upper - lower
@@ -3498,9 +3500,15 @@ def sendfile_py(
         if slp:
             time.sleep(slp)
 
+        if bwl:
+            bufsz = bwl.bufsz
+
         buf = f.read(min(bufsz, remains))
         if not buf:
             return remains
+
+        if bwl:
+            bwl.take(len(buf))
 
         try:
             s.sendall(buf)
@@ -3526,6 +3534,7 @@ def sendfile_kern(
     use_poll: bool,
     dls: dict[str, tuple[float, int]],
     dl_id: str,
+    bwl: Optional["BwStream"] = None,
 ) -> int:
     out_fd = s.fileno()
     in_fd = f.fileno()
@@ -3539,11 +3548,19 @@ def sendfile_kern(
         stuck = stuck or time.time()
         try:
             req = min(0x2000000, upper - ofs)  # 32 MiB
+            if bwl:
+                req = min(req, bwl.bufsz)
+                bwl.take(req)
             if use_poll:
                 poll.poll(10000)  # type: ignore
             else:
                 select.select([], [out_fd], [], 10)
-            n = os.sendfile(out_fd, in_fd, ofs, req)
+            n = 0
+            try:
+                n = os.sendfile(out_fd, in_fd, ofs, req)
+            finally:
+                if bwl:
+                    bwl.give(req - n)
             stuck = 0
         except OSError as ex:
             # client stopped reading; do another select

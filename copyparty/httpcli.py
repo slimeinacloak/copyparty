@@ -35,6 +35,7 @@ from .__init__ import ANYWIN, PY2, RES, RESM, TYPE_CHECKING, EnvParams, unicode
 from .__version__ import S_VERSION
 from .authsrv import LEELOO_DALLAS, VFS  # typechk
 from .bos import bos
+from .bwlim import BwStream  # typechk
 from .qrkode import qr2svg, qrgen
 from .star import StreamTar
 from .sutil import StreamArc, gfilter
@@ -289,6 +290,7 @@ class HttpCli(object):
         self.vpath = " "
         self.vpaths = " "
         self.dl_id = ""
+        self.bwl: Optional[BwStream] = None
         self.gctx = " "  # additional context for garda
         self.trailing_slash = True
         self.uname = "*"
@@ -1016,6 +1018,20 @@ class HttpCli(object):
             if self.dl_id:
                 self.conn.hsrv.dli.pop(self.dl_id, None)
                 self.conn.hsrv.dls.pop(self.dl_id, None)
+            if self.bwl:
+                self.bwl.close()
+
+    def bwl_open(self) -> Optional[BwStream]:
+        bwlim = self.conn.hsrv.bwlim
+        if bwlim and not self.bwl:
+            self.bwl = bwlim.open(self.asrv, self.uname, self.ip)
+        return self.bwl
+
+    def bwl_send(self, buf: bytes) -> None:
+        if self.bwl:
+            self.bwl.sendall(self.s, buf)
+        else:
+            self.s.sendall(buf)
 
     def dip(self) -> str:
         if self.args.plain_ip:
@@ -1615,7 +1631,7 @@ class HttpCli(object):
         vpath = vjoin(vfs.vpath, rem)
         ap = vfs.canonical(rem)
         if query.startswith("/contents"):
-            return self.tx_file("oh_f", ap)
+            return self.tx_file("oh_f", ap, None, True)
         else:
             st = bos.stat(ap)
             file_info = {
@@ -1940,6 +1956,7 @@ class HttpCli(object):
                         not self.args.no_poll,
                         {},
                         "",
+                        self.bwl_open(),
                     )
         except KeyError:
             raise Pebkac(404, "no such file in archive")
@@ -4865,7 +4882,9 @@ class HttpCli(object):
 
         return ret
 
-    def tx_file(self, oh_k: str, req_path: str, ptop: Optional[str] = None) -> bool:
+    def tx_file(
+        self, oh_k: str, req_path: str, ptop: Optional[str] = None, bwl: bool = False
+    ) -> bool:
         status = 200
         logmsg = "{:4} {} ".format("", self.req)
         logtail = ""
@@ -5087,6 +5106,9 @@ class HttpCli(object):
             self.send_headers(oh_k, length=upper - lower, status=status, mime=mime)
             return True
 
+        if bwl:
+            self.bwl_open()
+
         dls = self.conn.hsrv.dls
         if is_tail:
             upper = 1 << 30
@@ -5130,6 +5152,7 @@ class HttpCli(object):
                 not self.args.no_poll,
                 dls,
                 self.dl_id,
+                self.bwl,
             )
 
         if remains > 0:
@@ -5159,6 +5182,7 @@ class HttpCli(object):
         wr_sz = self.args.s_wr_sz
         dls = self.conn.hsrv.dls
         dl_id = self.dl_id
+        bwl = self.bwl
 
         # non-numeric = full file from start
         # positive = absolute offset from start
@@ -5194,6 +5218,7 @@ class HttpCli(object):
                 False,  # d/c
                 dls,
                 dl_id,
+                bwl,
             )
             sent = (eof - ofs) - remains
             f.seek(eof - remains)
@@ -5215,7 +5240,7 @@ class HttpCli(object):
 
                 if buf:
                     t_fd = t_ka = now
-                    self.s.sendall(buf)
+                    self.bwl_send(buf)
                     sent += len(buf)
                     ofs += len(buf)
                     unsent = False
@@ -5283,6 +5308,7 @@ class HttpCli(object):
         wr_sz = self.args.s_wr_sz
         dls = self.conn.hsrv.dls
         dl_id = self.dl_id
+        bwl = self.bwl
         file_size = job["size"]
         chunk_size = up2k_chunksize(file_size)
         num_need = -1
@@ -5389,7 +5415,10 @@ class HttpCli(object):
                     time.sleep(slp)
 
                 try:
-                    buf = page[pofs : pofs + bufsz]
+                    zi = min(bufsz, bwl.bufsz) if bwl else bufsz
+                    buf = page[pofs : pofs + zi]
+                    if bwl:
+                        bwl.take(len(buf))
                     self.s.sendall(buf)
                     zi = len(buf)
                     remains -= zi
@@ -5415,6 +5444,7 @@ class HttpCli(object):
                     not self.args.no_poll,
                     dls,
                     dl_id,
+                    bwl,
                 )
 
         spd = self._spd((upper - lower) - remains)
@@ -5536,6 +5566,7 @@ class HttpCli(object):
         )
         dls = self.conn.hsrv.dls
         dls[self.dl_id] = (time.time(), 0)
+        self.bwl_open()
 
         bgen = packer(
             self.log,
@@ -5552,7 +5583,7 @@ class HttpCli(object):
                 break
 
             try:
-                self.s.sendall(buf)
+                self.bwl_send(buf)
                 bsent += len(buf)
             except:
                 logmsg += " \033[31m" + unicode(bsent) + "\033[0m"
@@ -5729,8 +5760,9 @@ class HttpCli(object):
             if fullfile:
                 self.s.sendall(fullfile)
             else:
+                self.bwl_open()
                 for buf in yieldfile(fs_path, self.args.iobuf):
-                    self.s.sendall(html_bescape(buf))
+                    self.bwl_send(html_bescape(buf))
 
             self.s.sendall(html[1])
 
@@ -7187,7 +7219,8 @@ class HttpCli(object):
                         raise
 
                 if thp:
-                    return self.tx_file("oh_f", thp)
+                    # audio transcodes are the entire file, so they count as downloads
+                    return self.tx_file("oh_f", thp, None, th_fmt in ACODE2_FMT)
 
                 if th_fmt == "p":
                     raise Pebkac(404)
@@ -7276,9 +7309,10 @@ class HttpCli(object):
 
             if not add_og or not og_fn:
                 if st.st_size or "nopipe" in vn.flags:
-                    return self.tx_file("oh_f", abspath, None)
+                    return self.tx_file("oh_f", abspath, None, True)
                 else:
-                    return self.tx_file("oh_f", abspath, vn.get_dbv("")[0].realpath)
+                    ptop = vn.get_dbv("")[0].realpath
+                    return self.tx_file("oh_f", abspath, ptop, True)
 
         elif is_dir and not self.can_read:
             if use_dirkey:

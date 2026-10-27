@@ -1565,6 +1565,13 @@ def add_network(ap):
     ap2.add_argument("--list-ips", action="store_true", help="debug: list detected LAN IPs")
 
 
+def add_bwlim(ap):
+    ap2 = ap.add_argument_group("download speed limits (http/webdav)")
+    ap2.add_argument("--dl-bw-all", metavar="SPEED", type=u, default="0", help="max combined speed of all file downloads, in bytes per second; [\033[32m100m\033[0m] = 100 MiB/s, [\033[32m0\033[0m] = unlimited. Shared equally between the active downloads")
+    ap2.add_argument("--dl-bw-usr", metavar="SPEED", type=u, default="0", help="max combined download speed for each user, in bytes per second; [\033[32m5m\033[0m] = 5 MiB/s, [\033[32m0\033[0m] = unlimited. If a user has several downloads running, they split the speed between them. Anonymous visitors are limited per IP-address")
+    ap2.add_argument("--dl-bw", metavar="U=SPEED", type=u, action="append", help="\033[34mREPEATABLE:\033[0m override \033[33m--dl-bw-usr\033[0m for specific users (comma-separated); \033[33mU\033[0m is a username, [\033[32m@group\033[0m], or [\033[32m*\033[0m] for anonymous visitors. Example: [\033[32malice=20m, @admins=0, *=1m\033[0m] where 0 = no per-user limit. If a user is in several groups, the fastest one wins")
+
+
 def add_tls(ap, cert_path):
     ap2 = ap.add_argument_group("SSL/TLS options")
     ap2.add_argument("--http-only", action="store_true", help="disable ssl/tls -- force plaintext")
@@ -2298,6 +2305,7 @@ def run_argparse(
 
     add_general(ap, nc, srvname)
     add_network(ap)
+    add_bwlim(ap)
     add_tls(ap, cert_path)
     add_cert(ap, cert_path)
     add_auth(ap)

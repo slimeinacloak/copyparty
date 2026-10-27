@@ -41,6 +41,7 @@ from .__init__ import (
 from .__version__ import S_VERSION, VERSION
 from .authsrv import BAD_CFG, AuthSrv, derive_args, n_du_who, n_ver_who
 from .bos import bos
+from .bwlim import load_bwlim
 from .cert import ensure_cert
 from .fsutil import ramdisk_chk
 from .mtag import HAVE_FFMPEG, HAVE_FFPROBE, HAVE_MUTAGEN, TH_BWRAP
@@ -351,6 +352,8 @@ class SvcHub(object):
             zsl = [x.strip() for x in zs.split(",")]
             noch.update([x for x in zsl if x])
         args.chpw_no = noch
+
+        load_bwlim(args)
 
         if args.ipu:
             iu, nm = load_ipu(self.log, args.ipu, True)
